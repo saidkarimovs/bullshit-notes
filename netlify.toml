@@ -1,0 +1,31 @@
+# Netlify configuration for the SkyVision / bullshit notes frontend.
+# The deployable app lives in apps/web. Netlify's Next.js runtime turns the
+# App Router route handlers (apps/web/src/app/api/**) into serverless functions,
+# so the Supabase-backed API runs on Netlify with no separate server.
+
+[build]
+  base = "apps/web"
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # First deploy runs in demo mode so the site is live immediately.
+  # After you add the Supabase variables below in the Netlify UI, set this to
+  # "false" (Site settings → Environment variables) and redeploy for real data.
+  NEXT_PUBLIC_DEMO_MODE = "true"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# -----------------------------------------------------------------------------
+# Environment variables to add in the Netlify UI (Site settings → Environment):
+#
+#   NEXT_PUBLIC_SUPABASE_URL        = https://<project-ref>.supabase.co
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY   = <anon public key>
+#   SUPABASE_SERVICE_ROLE_KEY       = <service role key>   (secret, server only)
+#   NEXT_PUBLIC_DEMO_MODE           = false                 (to enable real data)
+#
+# NEXT_PUBLIC_* values are baked into the build, so redeploy after changing them.
+# SUPABASE_SERVICE_ROLE_KEY is only ever read in route handlers (server side).
+# -----------------------------------------------------------------------------

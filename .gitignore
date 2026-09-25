@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Builds / outputs
+dist/
+build/
+.next/
+.next-prod/
+out/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Prisma generated client
+apps/api/node_modules/.prisma/
+**/generated/
+
+# Environment — never commit real secrets. .env.example files are kept.
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Netlify
+.netlify/
+
+# Playwright (self-host export worker)
+/apps/api/test-results/
+/apps/api/playwright-report/

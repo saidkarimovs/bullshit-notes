@@ -1,0 +1,239 @@
+// ===========================================================
+// PROMPT 2 MODELS
+// Paste this block verbatim under the marker comment
+// "// PROMPT 2 APPENDS ITS MODELS BELOW THIS LINE." in schema.prisma.
+//
+// Design note: to avoid modifying any Prompt 1 model, every reference to an
+// existing entity (User, Project, Report) is a NULLABLE/PLAIN scalar id with an
+// @@index — NOT a Prisma relation. No back-relations are required on existing
+// models (see MERGE-NOTES.md).
+// ===========================================================
+
+// ---- enums ----
+
+enum CveWatchKind {
+  VENDOR
+  PRODUCT
+  KEYWORD
+  CWE
+}
+
+enum VdpEventKind {
+  REPORTED
+  ACK
+  TRIAGE_UPDATE
+  FIX_PLANNED
+  FIX_SHIPPED
+  DISCLOSURE_REQUESTED
+  DISCLOSED
+  EXTENSION_GRANTED
+  NO_RESPONSE
+}
+
+enum VaultKind {
+  PASSWORD
+  API_KEY
+  TOKEN
+  SSH_KEY
+  CERTIFICATE
+  OTHER
+}
+
+enum WebhookKind {
+  DISCORD
+  SLACK
+  TELEGRAM
+  GENERIC
+}
+
+// ---- ai ----
+
+model AiSettings {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  provider            String
+  encryptedKey        String
+  model               String
+  baseUrl             String?
+  maxTokens           Int      @default(2000)
+  temperature         Float    @default(0.7)
+  monthlyTokenBudget  Int?
+  tokensUsedThisMonth Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// ---- cve ----
+
+model Cve {
+  id             String    @id @default(cuid())
+  cveId          String    @unique
+  description    String
+  published      DateTime
+  lastModified   DateTime
+  cvssScore      Float?
+  cvssVector     String?
+  severity       Severity?
+  cwe            String[]
+  refs           String[]
+  vendors        String[]
+  products       String[]
+  isKev          Boolean   @default(false)
+  kevDueDate     DateTime?
+  epssScore      Float?
+  epssPercentile Float?
+  raw            Json
+  syncedAt       DateTime
+
+  @@index([severity])
+  @@index([isKev])
+  @@index([published])
+}
+
+model CveWatch {
+  id             String       @id @default(cuid())
+  userId         String
+  keyword        String
+  kind           CveWatchKind
+  lastNotifiedAt DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@unique([userId, keyword, kind])
+  @@index([userId])
+}
+
+model CveBookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  cveId     String
+  notes     String   @default("")
+  createdAt DateTime @default(now())
+
+  @@unique([userId, cveId])
+  @@index([userId])
+}
+
+// ---- bounty ----
+
+model HuntSession {
+  id          String    @id @default(cuid())
+  userId      String
+  projectId   String?
+  startedAt   DateTime
+  endedAt     DateTime?
+  durationSec Int?
+  notes       String    @default("")
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, startedAt])
+  @@index([userId, endedAt])
+}
+
+// ---- vdp ----
+
+model VdpContact {
+  id              String    @id @default(cuid())
+  projectId       String
+  name            String
+  email           String
+  role            String?
+  lastContactedAt DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([projectId])
+}
+
+model VdpEvent {
+  id         String       @id @default(cuid())
+  reportId   String
+  kind       VdpEventKind
+  body       String
+  occurredAt DateTime
+  createdAt  DateTime     @default(now())
+
+  @@index([reportId, occurredAt])
+}
+
+// ---- payloads ----
+
+model Payload {
+  id          String   @id @default(cuid())
+  title       String
+  category    String
+  body        String
+  language    String   @default("text")
+  description String   @default("")
+  variables   String[]
+  source      String?
+  ownerId     String
+  usageCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@index([ownerId])
+}
+
+// ---- checklists ----
+
+model ChecklistTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  framework   String
+  description String
+  items       Json
+  isBuiltIn   Boolean  @default(false)
+  ownerId     String?
+  createdAt   DateTime @default(now())
+
+  @@index([framework])
+}
+
+model Checklist {
+  id         String   @id @default(cuid())
+  templateId String?
+  projectId  String
+  name       String
+  items      Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// ---- vault ----
+
+model VaultEntry {
+  id              String    @id @default(cuid())
+  projectId       String
+  label           String
+  username        String?
+  encryptedSecret String
+  kind            VaultKind
+  url             String?
+  notes           String    @default("")
+  ownerId         String
+  lastAccessedAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([ownerId, projectId])
+}
+
+// ---- webhooks ----
+
+model Webhook {
+  id           String      @id @default(cuid())
+  ownerId      String
+  url          String
+  kind         WebhookKind
+  events       String[]
+  secret       String
+  active       Boolean     @default(true)
+  lastFiredAt  DateTime?
+  failureCount Int         @default(0)
+  createdAt    DateTime    @default(now())
+
+  @@index([ownerId])
+  @@index([active])
+}

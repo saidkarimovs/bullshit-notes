@@ -1,0 +1,14 @@
+# bullshit notes reverse proxy
+# API traffic goes to the NestJS app, everything else to the Next.js web app.
+
+:80 {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy api:4000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

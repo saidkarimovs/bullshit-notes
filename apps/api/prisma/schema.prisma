@@ -1,0 +1,560 @@
+// Prisma schema for "bullshit notes"
+// Owned by Prompt 1. Prompt 2 appends its models at the very bottom.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions", "fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto, pg_trgm]
+}
+
+// ===========================================================
+// Enums
+// ===========================================================
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  READONLY
+}
+
+enum ReportType {
+  CVE
+  BBP
+  VDP
+  PENTEST
+  INTERNAL
+}
+
+enum ReportStatus {
+  DRAFT
+  SUBMITTED
+  TRIAGED
+  ACCEPTED
+  DUPLICATE
+  REJECTED
+  PAID
+}
+
+enum Severity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ProjectType {
+  BOUNTY_PROGRAM
+  PENTEST_CLIENT
+  PERSONAL_RESEARCH
+}
+
+enum ProjectStatus {
+  ACTIVE
+  PAUSED
+  CLOSED
+  ARCHIVED
+}
+
+enum AssetKind {
+  DOMAIN
+  SUBDOMAIN
+  IP
+  URL
+  ENDPOINT
+  MOBILE_APP
+  REPO
+  CLOUD
+}
+
+enum AssetStatus {
+  IN_SCOPE
+  OUT_OF_SCOPE
+  UNVERIFIED
+}
+
+// ===========================================================
+// Models
+// ===========================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  passwordHash  String
+  role          Role      @default(MEMBER)
+  totpSecret    String?
+  totpEnabled   Boolean   @default(false)
+  recoveryCodes String[]
+  avatarUrl     String?
+  timezone      String    @default("UTC")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+
+  sessions      Session[]
+  ownedProjects Project[]     @relation("ProjectOwner")
+  reports       Report[]
+  notes         Note[]
+  auditLogs     AuditLog[]
+  attachments   Attachment[]
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  refreshTokenHash String    @unique
+  userAgent        String?
+  ip               String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Project {
+  id           String        @id @default(cuid())
+  name         String
+  slug         String        @unique
+  type         ProjectType
+  status       ProjectStatus @default(ACTIVE)
+  platform     String?
+  programUrl   String?
+  scopeNotesMd String        @default("")
+  payoutMin    Int?
+  payoutMax    Int?
+  currency     String        @default("USD")
+  nda          Boolean       @default(false)
+  startedAt    DateTime?
+  closedAt     DateTime?
+  ownerId      String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  owner   User     @relation("ProjectOwner", fields: [ownerId], references: [id])
+  reports Report[]
+  assets  Asset[]
+  notes   Note[]
+  tags    Tag[]    @relation("ProjectTags")
+
+  @@index([status, type])
+}
+
+model Asset {
+  id          String      @id @default(cuid())
+  projectId   String
+  kind        AssetKind
+  value       String
+  status      AssetStatus @default(UNVERIFIED)
+  tech        String[]
+  httpStatus  Int?
+  title       String?
+  ipAddress   String?
+  port        Int?
+  notesMd     String      @default("")
+  firstSeenAt DateTime    @default(now())
+  lastSeenAt  DateTime    @default(now())
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, value])
+  @@index([projectId, status])
+}
+
+model Report {
+  id                 String        @id @default(cuid())
+  title              String
+  slug               String        @unique
+  type               ReportType
+  status             ReportStatus  @default(DRAFT)
+  severity           Severity      @default(INFO)
+  cvssVector         String?
+  cvssScore          Float?
+  cweId              String?
+  cveId              String?
+  bodyMd             String        @default("")
+  projectId          String?
+  authorId           String
+  submittedAt        DateTime?
+  resolvedAt         DateTime?
+  paidAt             DateTime?
+  bountyAmount       Decimal?      @db.Decimal(12, 2)
+  bountyCurrency     String?
+  duplicateOfId      String?
+  platformRef        String?
+  disclosedAt        DateTime?
+  disclosureDeadline DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  project     Project?      @relation(fields: [projectId], references: [id])
+  author      User          @relation(fields: [authorId], references: [id])
+  duplicateOf Report?       @relation("ReportDuplicate", fields: [duplicateOfId], references: [id])
+  duplicates  Report[]      @relation("ReportDuplicate")
+  events      ReportEvent[]
+  attachments Attachment[]
+  tags        Tag[]         @relation("ReportTags")
+
+  @@index([type, status])
+  @@index([severity])
+  @@index([projectId])
+}
+
+model ReportEvent {
+  id         String        @id @default(cuid())
+  reportId   String
+  fromStatus ReportStatus?
+  toStatus   ReportStatus
+  note       String?
+  actorId    String
+  createdAt  DateTime      @default(now())
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, createdAt])
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String
+  parentId  String?
+  ownerId   String
+  createdAt DateTime @default(now())
+
+  parent   Folder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children Folder[] @relation("FolderTree")
+  notes    Note[]
+
+  @@unique([parentId, name, ownerId])
+}
+
+model Note {
+  id          String    @id @default(cuid())
+  title       String
+  slug        String    @unique
+  bodyMd      String    @default("")
+  folderId    String?
+  projectId   String?
+  authorId    String
+  frontmatter Json      @default("{}")
+  pinned      Boolean   @default(false)
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  folder        Folder?      @relation(fields: [folderId], references: [id])
+  project       Project?     @relation(fields: [projectId], references: [id])
+  author        User         @relation(fields: [authorId], references: [id])
+  outgoingLinks NoteLink[]   @relation("NoteOutgoing")
+  incomingLinks NoteLink[]   @relation("NoteIncoming")
+  tags          Tag[]        @relation("NoteTags")
+  attachments   Attachment[]
+}
+
+model NoteLink {
+  id           String   @id @default(cuid())
+  sourceNoteId String
+  targetNoteId String?
+  targetTitle  String
+  resolved     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  source Note  @relation("NoteOutgoing", fields: [sourceNoteId], references: [id], onDelete: Cascade)
+  target Note? @relation("NoteIncoming", fields: [targetNoteId], references: [id], onDelete: SetNull)
+
+  @@unique([sourceNoteId, targetTitle])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  color     String   @default("#6b7280")
+  createdAt DateTime @default(now())
+
+  reports  Report[]  @relation("ReportTags")
+  notes    Note[]    @relation("NoteTags")
+  projects Project[] @relation("ProjectTags")
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  filename     String
+  mimeType     String
+  sizeBytes    Int
+  storageKey   String   @unique
+  sha256       String
+  reportId     String?
+  noteId       String?
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  report     Report? @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  note       Note?   @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  uploadedBy User    @relation(fields: [uploadedById], references: [id])
+
+  @@index([reportId])
+  @@index([noteId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json     @default("{}")
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+}
+
+// ===========================================================
+// PROMPT 2 APPENDS ITS MODELS BELOW THIS LINE.
+// Do not add models above. Do not modify anything above.
+// ===========================================================
+
+// ---- enums ----
+
+enum CveWatchKind {
+  VENDOR
+  PRODUCT
+  KEYWORD
+  CWE
+}
+
+enum VdpEventKind {
+  REPORTED
+  ACK
+  TRIAGE_UPDATE
+  FIX_PLANNED
+  FIX_SHIPPED
+  DISCLOSURE_REQUESTED
+  DISCLOSED
+  EXTENSION_GRANTED
+  NO_RESPONSE
+}
+
+enum VaultKind {
+  PASSWORD
+  API_KEY
+  TOKEN
+  SSH_KEY
+  CERTIFICATE
+  OTHER
+}
+
+enum WebhookKind {
+  DISCORD
+  SLACK
+  TELEGRAM
+  GENERIC
+}
+
+// ---- ai ----
+
+model AiSettings {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  provider            String
+  encryptedKey        String
+  model               String
+  baseUrl             String?
+  maxTokens           Int      @default(2000)
+  temperature         Float    @default(0.7)
+  monthlyTokenBudget  Int?
+  tokensUsedThisMonth Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// ---- cve ----
+
+model Cve {
+  id             String    @id @default(cuid())
+  cveId          String    @unique
+  description    String
+  published      DateTime
+  lastModified   DateTime
+  cvssScore      Float?
+  cvssVector     String?
+  severity       Severity?
+  cwe            String[]
+  refs           String[]
+  vendors        String[]
+  products       String[]
+  isKev          Boolean   @default(false)
+  kevDueDate     DateTime?
+  epssScore      Float?
+  epssPercentile Float?
+  raw            Json
+  syncedAt       DateTime
+
+  @@index([severity])
+  @@index([isKev])
+  @@index([published])
+}
+
+model CveWatch {
+  id             String       @id @default(cuid())
+  userId         String
+  keyword        String
+  kind           CveWatchKind
+  lastNotifiedAt DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@unique([userId, keyword, kind])
+  @@index([userId])
+}
+
+model CveBookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  cveId     String
+  notes     String   @default("")
+  createdAt DateTime @default(now())
+
+  @@unique([userId, cveId])
+  @@index([userId])
+}
+
+// ---- bounty ----
+
+model HuntSession {
+  id          String    @id @default(cuid())
+  userId      String
+  projectId   String?
+  startedAt   DateTime
+  endedAt     DateTime?
+  durationSec Int?
+  notes       String    @default("")
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, startedAt])
+  @@index([userId, endedAt])
+}
+
+// ---- vdp ----
+
+model VdpContact {
+  id              String    @id @default(cuid())
+  projectId       String
+  name            String
+  email           String
+  role            String?
+  lastContactedAt DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([projectId])
+}
+
+model VdpEvent {
+  id         String       @id @default(cuid())
+  reportId   String
+  kind       VdpEventKind
+  body       String
+  occurredAt DateTime
+  createdAt  DateTime     @default(now())
+
+  @@index([reportId, occurredAt])
+}
+
+// ---- payloads ----
+
+model Payload {
+  id          String   @id @default(cuid())
+  title       String
+  category    String
+  body        String
+  language    String   @default("text")
+  description String   @default("")
+  variables   String[]
+  source      String?
+  ownerId     String
+  usageCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@index([ownerId])
+}
+
+// ---- checklists ----
+
+model ChecklistTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  framework   String
+  description String
+  items       Json
+  isBuiltIn   Boolean  @default(false)
+  ownerId     String?
+  createdAt   DateTime @default(now())
+
+  @@index([framework])
+}
+
+model Checklist {
+  id         String   @id @default(cuid())
+  templateId String?
+  projectId  String
+  name       String
+  items      Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// ---- vault ----
+
+model VaultEntry {
+  id              String    @id @default(cuid())
+  projectId       String
+  label           String
+  username        String?
+  encryptedSecret String
+  kind            VaultKind
+  url             String?
+  notes           String    @default("")
+  ownerId         String
+  lastAccessedAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([ownerId, projectId])
+}
+
+// ---- webhooks ----
+
+model Webhook {
+  id           String      @id @default(cuid())
+  ownerId      String
+  url          String
+  kind         WebhookKind
+  events       String[]
+  secret       String
+  active       Boolean     @default(true)
+  lastFiredAt  DateTime?
+  failureCount Int         @default(0)
+  createdAt    DateTime    @default(now())
+
+  @@index([ownerId])
+  @@index([active])
+}
